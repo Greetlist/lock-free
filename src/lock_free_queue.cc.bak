@@ -1,0 +1,50 @@
+#include "lock_free_queue.h"
+
+template <class T>
+LockFreeQueue<T>::LockFreeQueue(uint64_t queue_size): capacity_(queue_size) {
+}
+
+template <class T>
+LockFreeQueue<T>::~LockFreeQueue() {
+  free(data_arr_);
+  data_arr_ = nullptr;
+}
+
+template <class T>
+bool LockFreeQueue<T>::push(T* new_data) {
+  uint64_t cur_write_index = write_index_.load();
+  uint64_t cur_read_index = read_index_.load();
+  if ((cur_write_index + 1) % capacity_ == cur_read_index) {
+    return false;
+  }
+  uint64_t wr_idx = std::atomic_fetch_add(&write_index_, (uint64_t)1);
+  wr_idx = wr_idx % capacity_;
+  std::atomic_thread_fence(std::memory_order_seq_cst);
+  data_arr_[wr_idx] = new_data;
+  return true;
+}
+
+template <class T>
+T* LockFreeQueue<T>::front() {
+  uint64_t cur_write_index = write_index_.load();
+  uint64_t cur_read_index = read_index_.load();
+  if ((cur_read_index % capacity_) == cur_write_index) {
+    return nullptr;
+  }
+  return data_arr_[cur_read_index];
+}
+
+template <class T>
+bool LockFreeQueue<T>::pop() {
+  uint64_t cur_write_index = write_index_.load();
+  uint64_t cur_read_index = read_index_.load();
+  if ((cur_read_index % capacity_) == cur_write_index) {
+    return false;
+  }
+  return read_index_.compare_exchange_strong(cur_read_index, cur_read_index + 1);
+}
+
+template <class T>
+uint64_t LockFreeQueue<T>::capacity() {
+  return capacity_;
+}
