@@ -27,26 +27,31 @@ public:
   LockFreeQueueV2(const LockFreeQueueV2& q) = delete;
   LockFreeQueueV2 operator=(const LockFreeQueueV2& q) = delete;
 
-  ~LockFreeQueueV2() {}
+  ~LockFreeQueueV2() {
+    for (auto i = 0; i < capacity_; ++i) {
+      delete data_buff_[i];
+    }
+  }
 
   bool Push(T* new_data) {
-    uint64_t cur_tail = tail_.load();
-    if (data_buff_[cur_tail & mask_]->writer_version_.load() != cur_tail || !tail_.compare_exchange_weak(cur_tail, cur_tail + 1)) {
+    uint64_t cur_tail = tail_.load(std::memory_order_acquire);
+    if (data_buff_[cur_tail & mask_]->writer_version_.load(std::memory_order_acquire) != cur_tail || !tail_.compare_exchange_weak(cur_tail, cur_tail + 1, std::memory_order_release)) {
       return false;
     }
     data_buff_[cur_tail & mask_]->data_ = new_data;
-    data_buff_[cur_tail & mask_]->reader_version_.store(cur_tail);
+    data_buff_[cur_tail & mask_]->reader_version_.store(cur_tail, std::memory_order_release);
     return true;
   }
 
   T* Pop() {
-    uint64_t cur_head = head_.load();
-    if (data_buff_[cur_head & mask_]->reader_version_.load() != cur_head || !head_.compare_exchange_weak(cur_head, cur_head + 1)) {
+    uint64_t cur_head = head_.load(std::memory_order_acquire);
+    if (data_buff_[cur_head & mask_]->reader_version_.load(std::memory_order_acquire) != cur_head || !head_.compare_exchange_weak(cur_head, cur_head + 1, std::memory_order_release)) {
       return nullptr;
     }
 
     T* res = data_buff_[cur_head & mask_]->data_;
-    data_buff_[cur_head & mask_]->writer_version_.store(cur_head + capacity_);
+    data_buff_[cur_head & mask_]->data_ = nullptr;
+    data_buff_[cur_head & mask_]->writer_version_.store(cur_head + capacity_, std::memory_order_release);
     return res;
   }
 
@@ -60,6 +65,11 @@ public:
 private:
   struct Node {
     Node() : data_(nullptr), writer_version_(0), reader_version_(0) {}
+    ~Node() {
+      if (data_ != nullptr) {
+        delete data_;
+      }
+    }
     T* data_;
     std::atomic<uint64_t> writer_version_;
     std::atomic<uint64_t> reader_version_;
